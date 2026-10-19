@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>9-Cat Fantasy Basketball Draft Assistant</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    body { background-color: #0f172a; color: #f8fafc; font-family: ui-sans-serif, system-ui, sans-serif; }
+  </style>
+</head>
+<body class="p-4 md:p-8">
+  <div id="app" class="max-w-7xl mx-auto space-y-6">
+    
+    <!-- 頂部 Header & 順位設定 -->
+    <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-800 p-5 rounded-xl border border-slate-700">
+      <div>
+        <h1 class="text-2xl font-bold text-amber-400 flex items-center gap-2">
+          🏀 9-Cat Fantasy Draft Assistant
+        </h1>
+        <p class="text-xs text-slate-400 mt-1">基於前 130 名 Top Players Baseline 與前三輪自動 Punt 診斷</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-4 text-sm">
+        <div>
+          <label class="block text-slate-400 text-xs mb-1">聯盟人數</label>
+          <select v-model.number="teamsCount" class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 focus:outline-none focus:border-amber-400">
+            <option :value="10">10 人盟</option>
+            <option :value="12">12 人盟</option>
+            <option :value="14">14 人盟</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-slate-400 text-xs mb-1">你的選秀順位</label>
+          <select v-model.number="userPosition" class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 focus:outline-none focus:border-amber-400">
+            <option v-for="n in teamsCount" :key="n" :value="n">第 {{ n }} 順位</option>
+          </select>
+        </div>
+        <div class="bg-slate-900 px-3 py-2 rounded border border-slate-700 text-xs">
+          <span class="text-slate-400 block">前三輪對應 Pick</span>
+          <span class="font-mono text-amber-300">#{{ myPicks[0] }}, #{{ myPicks[1] }}, #{{ myPicks[2] }}</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 主區塊：兩欄配置 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+      <!-- 左卡片：前三輪基石選牌 -->
+      <section class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+          <h2 class="font-bold text-slate-200">📥 前 3 輪基石球員 (Core Anchors)</h2>
+          <span class="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">選滿 3 人觸發診斷</span>
+        </div>
+
+        <div class="space-y-3">
+          <div v-for="(roundNum, idx) in 3" :key="idx" class="p-3 bg-slate-900 rounded-lg border border-slate-700/50 flex items-center justify-between">
+            <div>
+              <span class="text-xs text-slate-400 block">Round {{ roundNum }} (Pick #{{ myPicks[idx] }})</span>
+              <span v-if="selectedCorePlayers[idx]" class="font-bold text-slate-100">
+                {{ selectedCorePlayers[idx].name }} 
+                <span class="text-xs text-slate-400">({{ selectedCorePlayers[idx].positions.join('/') }})</span>
+              </span>
+              <span v-else class="text-xs text-slate-500 italic">尚未選擇...</span>
+            </div>
+            
+            <button v-if="selectedCorePlayers[idx]" @click="removeCorePlayer(idx)" class="text-xs text-red-400 hover:text-red-300 px-2 py-1">
+              移除
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右卡片：自動戰術診斷 -->
+      <section class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-4 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+            <h2 class="font-bold text-slate-200">💡 戰術診斷器 (Punt Diagnostic)</h2>
+            <span v-if="recommendedPunts.length > 0" class="text-xs bg-red-900/60 text-red-300 border border-red-700 px-2 py-0.5 rounded">
+              建議 Punt 觸發
+            </span>
+          </div>
+
+          <div class="mt-4 space-y-3">
+            <div v-if="selectedCorePlayers.filter(Boolean).length < 3" class="text-slate-400 text-sm py-6 text-center border border-dashed border-slate-700 rounded-lg">
+              請在左側選滿前 3 輪球員以產生建議...
+            </div>
+            
+            <div v-else class="space-y-3">
+              <div class="text-xs text-slate-300">
+                前三輪短板分析：
+                <span v-for="cat in recommendedPunts" :key="cat" class="inline-block bg-red-900/80 text-red-200 border border-red-600 font-bold px-2 py-0.5 rounded text-xs mr-2 mt-1">
+                  Punt {{ cat.toUpperCase() }}
+                </span>
+              </div>
+
+              <!-- 手動勾選欄位 -->
+              <div class="bg-slate-900 p-3 rounded text-xs space-y-2">
+                <span class="text-slate-400 block font-semibold">當前套用的 Punt 策略（可手動微調）：</span>
+                <div class="flex flex-wrap gap-3">
+                  <label v-for="cat in catKeys" :key="cat" class="flex items-center gap-1 cursor-pointer">
+                    <input type="checkbox" :value="cat" v-model="activePunts" class="accent-amber-400">
+                    <span :class="{'text-amber-400 font-bold': activePunts.includes(cat), 'text-slate-400': !activePunts.includes(cat)}">
+                      {{ cat.toUpperCase() }}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button 
+          v-if="recommendedPunts.length > 0 && !hasAppliedRec"
+          @click="applyRecommendedPunts" 
+          class="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2 rounded text-sm transition"
+        >
+          ⚡ 一鍵套用推薦 Punt 戰術
+        </button>
+      </section>
+
+    </div>
+
+    <!-- 下方主表格：剩餘球員動態排名 -->
+    <main class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-700 pb-3">
+        <h2 class="font-bold text-slate-200">📋 第 4-13 輪剩餘球員動態排名 (Dynamic Rankings)</h2>
+        <span class="text-xs text-slate-400">目前套用 Punt: <span class="text-amber-400 font-mono">{{ activePunts.length ? activePunts.join(', ').toUpperCase() : 'NONE' }}</span></span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-300">
+          <thead class="bg-slate-900 text-xs text-slate-400 uppercase border-b border-slate-700">
+            <tr>
+              <th class="p-3">Rank</th>
+              <th class="p-3">球員姓名</th>
+              <th class="p-3">位置</th>
+              <th class="p-3">Yahoo ADP</th>
+              <th class="p-3">Punt Z-Score</th>
+              <th class="p-3">動作</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-700/50">
+            <tr v-for="(player, idx) in rankedPlayers" :key="player.id" class="hover:bg-slate-700/40 transition">
+              <td class="p-3 font-mono font-bold text-amber-400">#{{ idx + 1 }}</td>
+              <td class="p-3 font-semibold text-slate-100">
+                {{ player.name }}
+                <span class="text-xs text-slate-500 ml-1">{{ player.team }}</span>
+              </td>
+              <td class="p-3">
+                <span v-for="pos in player.positions" :key="pos" class="inline-block bg-slate-900 text-slate-300 text-xs px-1.5 py-0.5 rounded border border-slate-700 mr-1">
+                  {{ pos }}
+                </span>
+              </td>
+              <td class="p-3 font-mono text-slate-400">{{ player.yahooAdp }}</td>
+              <td class="p-3 font-mono font-bold" :class="player.puntZ >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                {{ player.puntZ > 0 ? '+' + player.puntZ : player.puntZ }}
+              </td>
+              <td class="p-3">
+                <button 
+                  v-if="selectedCorePlayers.filter(Boolean).length < 3 && !selectedCorePlayers.includes(player)"
+                  @click="addCorePlayer(player)"
+                  class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs px-2.5 py-1 rounded border border-slate-600"
+                >
+                  選入前三輪
+                </button>
+                <span v-else-if="selectedCorePlayers.includes(player)" class="text-xs text-amber-400 font-semibold">
+                  已選入
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+  </div>
+
+  <script>
+    const { createApp, ref, computed } = Vue;
+
+    // Mock 預測數據
+    const MOCK_PLAYERS = [
+      { id: "p001", name: "Nikola Jokic", team: "DEN", positions: ["C"], yahooAdp: 1.1, stats: { pts: 26.4, reb: 12.4, ast: 9.0, stl: 1.4, blk: 0.9, tpm: 1.1, fgp: 0.583, fga: 15.7, ftp: 0.817, fta: 5.5, to: 3.0 } },
+      { id: "p002", name: "Giannis Antetokounmpo", team: "MIL", positions: ["PF", "C"], yahooAdp: 3.2, stats: { pts: 30.4, reb: 11.5, ast: 6.5, stl: 1.2, blk: 1.1, tpm: 0.5, fgp: 0.611, fga: 18.8, ftp: 0.657, fta: 10.7, to: 3.4 } },
+      { id: "p003", name: "Luka Doncic", team: "DAL", positions: ["PG"], yahooAdp: 2.5, stats: { pts: 33.9, reb: 9.2, ast: 9.8, stl: 1.4, blk: 0.5, tpm: 4.1, fgp: 0.487, fga: 23.6, ftp: 0.786, fta: 8.7, to: 4.0 } },
+      { id: "p004", name: "Shai Gilgeous-Alexander", team: "OKC", positions: ["PG"], yahooAdp: 4.1, stats: { pts: 30.1, reb: 5.5, ast: 6.2, stl: 2.0, blk: 0.9, tpm: 1.3, fgp: 0.535, fga: 19.8, ftp: 0.874, fta: 8.8, to: 2.2 } },
+      { id: "p008", name: "Steph Curry", team: "GSW", positions: ["PG"], yahooAdp: 8.4, stats: { pts: 26.4, reb: 4.5, ast: 5.1, stl: 0.7, blk: 0.4, tpm: 4.8, fgp: 0.450, fga: 19.5, ftp: 0.923, fta: 4.4, to: 2.8 } },
+      { id: "p022", name: "De'Aaron Fox", team: "SAC", positions: ["PG"], yahooAdp: 22.1, stats: { pts: 26.6, reb: 4.6, ast: 5.6, stl: 2.0, blk: 0.4, tpm: 2.6, fgp: 0.465, fga: 20.9, ftp: 0.738, fta: 5.7, to: 2.6 } },
+      { id: "p027", name: "Bam Adebayo", team: "MIA", positions: ["C"], yahooAdp: 27.4, stats: { pts: 19.3, reb: 10.4, ast: 3.9, stl: 1.1, blk: 1.0, tpm: 0.3, fgp: 0.521, fga: 14.3, ftp: 0.755, fta: 5.3, to: 2.3 } },
+      { id: "p040", name: "Rudy Gobert", team: "MIN", positions: ["C"], yahooAdp: 40.2, stats: { pts: 14.0, reb: 12.9, ast: 1.3, stl: 0.7, blk: 2.1, tpm: 0.0, fgp: 0.661, fga: 8.1, ftp: 0.638, fta: 5.2, to: 1.6 } }
+    ];
+
+    const CAT_KEYS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tpm', 'fgp', 'ftp', 'to'];
+
+    createApp({
+      setup() {
+        const teamsCount = ref(12);
+        const userPosition = ref(3);
+        const selectedCorePlayers = ref([]);
+        const activePunts = ref([]);
+        const hasAppliedRec = ref(false);
+
+        // 蛇形選秀 Pick 計算
+        const myPicks = computed(() => {
+          const t = teamsCount.value;
+          const pos = userPosition.value;
+          return [
+            pos,                  // Round 1
+            t * 2 - pos + 1,      // Round 2
+            t * 2 + pos           // Round 3
+          ];
+        });
+
+        // 加入與移除前三輪球員
+        const addCorePlayer = (player) => {
+          if (selectedCorePlayers.value.length < 3) {
+            selectedCorePlayers.value.push(player);
+          }
+        };
+
+        const removeCorePlayer = (idx) => {
+          selectedCorePlayers.value.splice(idx, 1);
+          hasAppliedRec.value = false;
+        };
+
+        // 簡單 Baseline 計算 Z-Score
+        const calculateZScore = (player, puntList) => {
+          let score = 0;
+          CAT_KEYS.forEach(cat => {
+            if (!puntList.includes(cat)) {
+              let z = 0;
+              if (cat === 'pts') z = (player.stats.pts - 20) / 5;
+              else if (cat === 'reb') z = (player.stats.reb - 7) / 3;
+              else if (cat === 'ast') z = (player.stats.ast - 5) / 2.5;
+              else if (cat === 'stl') z = (player.stats.stl - 1.2) / 0.4;
+              else if (cat === 'blk') z = (player.stats.blk - 0.8) / 0.5;
+              else if (cat === 'tpm') z = (player.stats.tpm - 2.0) / 1.0;
+              else if (cat === 'fgp') z = ((player.stats.fgp - 0.47) * player.stats.fga) / 1.5;
+              else if (cat === 'ftp') z = ((player.stats.ftp - 0.78) * player.stats.fta) / 1.5;
+              else if (cat === 'to') z = -(player.stats.to - 2.5) / 1.0;
+              
+              score += z;
+            }
+          });
+          return Number(score.toFixed(2));
+        };
+
+        // 推薦 Punt 分析
+        const recommendedPunts = computed(() => {
+          if (selectedCorePlayers.value.length < 3) return [];
+          const catTotals = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, tpm: 0, fgp: 0, ftp: 0, to: 0 };
+          
+          selectedCorePlayers.value.forEach(p => {
+            CAT_KEYS.forEach(cat => {
+              if (cat === 'ftp') catTotals.ftp += ((p.stats.ftp - 0.78) * p.stats.fta) / 1.5;
+              else if (cat === 'tpm') catTotals.tpm += (p.stats.tpm - 2.0) / 1.0;
+            });
+          });
+
+          const recs = [];
+          if (catTotals.ftp <= -1.5) recs.push('ftp');
+          if (catTotals.tpm <= -1.5) recs.push('tpm');
+          return recs;
+        });
+
+        const applyRecommendedPunts = () => {
+          activePunts.value = [...new Set([...activePunts.value, ...recommendedPunts.value])];
+          hasAppliedRec.value = true;
+        };
+
+        // 計算並排序剩餘球員
+        const rankedPlayers = computed(() => {
+          return MOCK_PLAYERS.map(p => ({
+            ...p,
+            puntZ: calculateZScore(p, activePunts.value)
+          })).sort((a, b) => b.puntZ - a.puntZ);
+        });
+
+        return {
+          teamsCount,
+          userPosition,
+          myPicks,
+          catKeys: CAT_KEYS,
+          selectedCorePlayers,
+          activePunts,
+          recommendedPunts,
+          hasAppliedRec,
+          rankedPlayers,
+          addCorePlayer,
+          removeCorePlayer,
+          applyRecommendedPunts
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
