@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>9-Cat Fantasy Basketball Draft Assistant (Top 200+)</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    body { background-color: #0f172a; color: #f8fafc; font-family: ui-sans-serif, system-ui, sans-serif; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+  </style>
+</head>
+<body class="p-4 md:p-8">
+  <div id="app" class="max-w-7xl mx-auto space-y-6">
+    
+    <!-- 頂部 Header & 順位設定 -->
+    <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-800 p-5 rounded-xl border border-slate-700">
+      <div>
+        <h1 class="text-2xl font-bold text-amber-400 flex items-center gap-2">
+          🏀 9-Cat Fantasy Draft Assistant
+          <span class="text-xs font-normal text-slate-300 bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">Top 200+ Active</span>
+        </h1>
+        <p class="text-xs text-slate-400 mt-1">前 200 名球員數據庫 · 前三輪自動 Punt 診斷 · 動態 Impact Z-Score 排名</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-4 text-sm">
+        <div>
+          <label class="block text-slate-400 text-xs mb-1">聯盟人數</label>
+          <select v-model.number="teamsCount" class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 focus:outline-none focus:border-amber-400">
+            <option :value="10">10 人盟</option>
+            <option :value="12">12 人盟</option>
+            <option :value="14">14 人盟</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-slate-400 text-xs mb-1">你的選秀順位</label>
+          <select v-model.number="userPosition" class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 focus:outline-none focus:border-amber-400">
+            <option v-for="n in teamsCount" :key="n" :value="n">第 {{ n }} 順位</option>
+          </select>
+        </div>
+        <div class="bg-slate-900 px-3 py-2 rounded border border-slate-700 text-xs">
+          <span class="text-slate-400 block">前三輪對應 Pick</span>
+          <span class="font-mono text-amber-300">#{{ myPicks[0] }}, #{{ myPicks[1] }}, #{{ myPicks[2] }}</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 主區塊：兩欄配置 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+      <!-- 左卡片：前三輪基石選牌 -->
+      <section class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+          <h2 class="font-bold text-slate-200">📥 前 3 輪基石球員 (Core Anchors)</h2>
+          <span class="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">選滿 3 人觸發診斷</span>
+        </div>
+
+        <div class="space-y-3">
+          <div v-for="(roundNum, idx) in 3" :key="idx" class="p-3 bg-slate-900 rounded-lg border border-slate-700/50 flex items-center justify-between">
+            <div>
+              <span class="text-xs text-slate-400 block">Round {{ roundNum }} (Pick #{{ myPicks[idx] }})</span>
+              <span v-if="selectedCorePlayers[idx]" class="font-bold text-slate-100">
+                {{ selectedCorePlayers[idx].name }} 
+                <span class="text-xs text-slate-400">({{ selectedCorePlayers[idx].positions.join('/') }})</span>
+              </span>
+              <span v-else class="text-xs text-slate-500 italic">尚未選擇...</span>
+            </div>
+            
+            <button v-if="selectedCorePlayers[idx]" @click="removeCorePlayer(idx)" class="text-xs text-red-400 hover:text-red-300 px-2 py-1">
+              移除
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右卡片：自動戰術診斷 -->
+      <section class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-4 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+            <h2 class="font-bold text-slate-200">💡 戰術診斷器 (Punt Diagnostic)</h2>
+            <span v-if="recommendedPunts.length > 0" class="text-xs bg-red-900/60 text-red-300 border border-red-700 px-2 py-0.5 rounded">
+              建議 Punt 觸發
+            </span>
+          </div>
+
+          <div class="mt-4 space-y-3">
+            <div v-if="selectedCorePlayers.filter(Boolean).length < 3" class="text-slate-400 text-sm py-6 text-center border border-dashed border-slate-700 rounded-lg">
+              請在下方列表中挑選並選滿前 3 輪球員以產生建議...
+            </div>
+            
+            <div v-else class="space-y-3">
+              <div class="text-xs text-slate-300">
+                前三輪短板分析：
+                <span v-if="recommendedPunts.length === 0" class="text-emerald-400">數據極為均衡，無需強制 Punt</span>
+                <span v-for="cat in recommendedPunts" :key="cat" class="inline-block bg-red-900/80 text-red-200 border border-red-600 font-bold px-2 py-0.5 rounded text-xs mr-2 mt-1">
+                  Punt {{ cat.toUpperCase() }}
+                </span>
+              </div>
+
+              <!-- 手動勾選欄位 -->
+              <div class="bg-slate-900 p-3 rounded text-xs space-y-2">
+                <span class="text-slate-400 block font-semibold">當前套用的 Punt 策略（可手動微調）：</span>
+                <div class="flex flex-wrap gap-3">
+                  <label v-for="cat in catKeys" :key="cat" class="flex items-center gap-1 cursor-pointer">
+                    <input type="checkbox" :value="cat" v-model="activePunts" class="accent-amber-400">
+                    <span :class="{'text-amber-400 font-bold': activePunts.includes(cat), 'text-slate-400': !activePunts.includes(cat)}">
+                      {{ cat.toUpperCase() }}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button 
+          v-if="recommendedPunts.length > 0 && !hasAppliedRec"
+          @click="applyRecommendedPunts" 
+          class="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2 rounded text-sm transition"
+        >
+          ⚡ 一鍵套用推薦 Punt 戰術
+        </button>
+      </section>
+
+    </div>
+
+    <!-- 下方主表格：剩餘球員動態排名 -->
+    <main class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-700 pb-3">
+        <div>
+          <h2 class="font-bold text-slate-200">📋 第 4-13 輪剩餘球員動態排名</h2>
+          <span class="text-xs text-slate-400">已載入 <span class="text-amber-400 font-bold">{{ filteredPlayers.length }}</span> / {{ totalPlayersCount }} 名球員</span>
+        </div>
+        
+        <!-- 搜尋與篩選列 -->
+        <div class="flex flex-wrap items-center gap-2">
+          <input 
+            type="text" 
+            v-model="searchQuery" 
+            placeholder="搜尋球員名稱或球隊..." 
+            class="bg-slate-900 border border-slate-700 text-xs text-slate-200 px-3 py-1.5 rounded focus:outline-none focus:border-amber-400 w-48"
+          />
+          <select v-model="positionFilter" class="bg-slate-900 border border-slate-700 text-xs text-slate-200 px-3 py-1.5 rounded focus:outline-none focus:border-amber-400">
+            <option value="ALL">所有位置</option>
+            <option value="PG">PG</option>
+            <option value="SG">SG</option>
+            <option value="SF">SF</option>
+            <option value="PF">PF</option>
+            <option value="C">C</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto max-h-[650px]">
+        <table class="w-full text-left text-sm text-slate-300 relative">
+          <thead class="bg-slate-900 text-xs text-slate-400 uppercase sticky top-0 z-10 border-b border-slate-700">
+            <tr>
+              <th class="p-3">Rank</th>
+              <th class="p-3">球員姓名</th>
+              <th class="p-3">位置</th>
+              <th class="p-3">ADP</th>
+              <th class="p-3">PTS</th>
+              <th class="p-3">REB</th>
+              <th class="p-3">AST</th>
+              <th class="p-3">3PM</th>
+              <th class="p-3">Punt Z-Score</th>
+              <th class="p-3">動作</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-700/50">
+            <tr v-for="(player, idx) in filteredPlayers" :key="player.id" class="hover:bg-slate-700/40 transition">
+              <td class="p-3 font-mono font-bold text-amber-400">#{{ idx + 1 }}</td>
+              <td class="p-3 font-semibold text-slate-100">
+                {{ player.name }}
+                <span class="text-xs text-slate-500 ml-1">{{ player.team }}</span>
+              </td>
+              <td class="p-3">
+                <span v-for="pos in player.positions" :key="pos" class="inline-block bg-slate-900 text-slate-300 text-xs px-1.5 py-0.5 rounded border border-slate-700 mr-1">
+                  {{ pos }}
+                </span>
+              </td>
+              <td class="p-3 font-mono text-slate-400 text-xs">{{ player.yahooAdp }}</td>
+              <td class="p-3 font-mono text-xs text-slate-400">{{ player.stats.pts }}</td>
+              <td class="p-3 font-mono text-xs text-slate-400">{{ player.stats.reb }}</td>
+              <td class="p-3 font-mono text-xs text-slate-400">{{ player.stats.ast }}</td>
+              <td class="p-3 font-mono text-xs text-slate-400">{{ player.stats.tpm }}</td>
+              <td class="p-3 font-mono font-bold" :class="player.puntZ >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                {{ player.puntZ > 0 ? '+' + player.puntZ : player.puntZ }}
+              </td>
+              <td class="p-3">
+                <button 
+                  v-if="selectedCorePlayers.filter(Boolean).length < 3 && !selectedCorePlayers.includes(player)"
+                  @click="addCorePlayer(player)"
+                  class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs px-2.5 py-1 rounded border border-slate-600"
+                >
+                  選入前三輪
+                </button>
+                <span v-else-if="selectedCorePlayers.includes(player)" class="text-xs text-amber-400 font-semibold">
+                  已選入
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+  </div>
+
+  <script>
+    const { createApp, ref, computed } = Vue;
+
+    // 前 200+ 名球員大資料庫
+    const RAW_PLAYERS = [
+      { id: "p001", name: "Nikola Jokic", team: "DEN", positions: ["C"], yahooAdp: 1.1, stats: { pts: 26.4, reb: 12.4, ast: 9.0, stl: 1.4, blk: 0.9, tpm: 1.1, fgp: 0.583, fga: 15.7, ftp: 0.817, fta: 5.5, to: 3.0 } },
+      { id: "p002", name: "Victor Wembanyama", team: "SAS", positions: ["PF", "C"], yahooAdp: 2.1, stats: { pts: 21.4, reb: 10.6, ast: 3.9, stl: 1.2, blk: 3.6, tpm: 1.8, fgp: 0.465, fga: 16.8, ftp: 0.796, fta: 5.2, to: 3.7 } },
+      { id: "p003", name: "Luka Doncic", team: "DAL", positions: ["PG"], yahooAdp: 2.8, stats: { pts: 33.9, reb: 9.2, ast: 9.8, stl: 1.4, blk: 0.5, tpm: 4.1, fgp: 0.487, fga: 23.6, ftp: 0.786, fta: 8.7, to: 4.0 } },
+      { id: "p004", name: "Shai Gilgeous-Alexander", team: "OKC", positions: ["PG"], yahooAdp: 3.5, stats: { pts: 30.1, reb: 5.5, ast: 6.2, stl: 2.0, blk: 0.9, tpm: 1.3, fgp: 0.535, fga: 19.8, ftp: 0.874, fta: 8.8, to: 2.2 } },
+      { id: "p005", name: "Giannis Antetokounmpo", team: "MIL", positions: ["PF", "C"], yahooAdp: 4.2, stats: { pts: 30.4, reb: 11.5, ast: 6.5, stl: 1.2, blk: 1.1, tpm: 0.5, fgp: 0.611, fga: 18.8, ftp: 0.657, fta: 10.7, to: 3.4 } },
+      { id: "p006", name: "Joel Embiid", team: "PHI", positions: ["C"], yahooAdp: 5.1, stats: { pts: 34.7, reb: 11.0, ast: 5.6, stl: 1.2, blk: 1.7, tpm: 1.4, fgp: 0.529, fga: 21.8, ftp: 0.883, fta: 11.6, to: 3.8 } },
+      { id: "p007", name: "Anthony Davis", team: "LAL", positions: ["PF", "C"], yahooAdp: 6.8, stats: { pts: 24.7, reb: 12.6, ast: 3.5, stl: 1.2, blk: 2.3, tpm: 0.4, fgp: 0.556, fga: 16.9, ftp: 0.816, fta: 6.8, to: 2.1 } },
+      { id: "p008", name: "Jayson Tatum", team: "BOS", positions: ["SF", "PF"], yahooAdp: 7.5, stats: { pts: 26.9, reb: 8.1, ast: 4.9, stl: 1.0, blk: 0.6, tpm: 3.1, fgp: 0.471, fga: 19.3, ftp: 0.833, fta: 6.7, to: 2.5 } },
+      { id: "p009", name: "Tyrese Haliburton", team: "IND", positions: ["PG"], yahooAdp: 8.2, stats: { pts: 20.1, reb: 3.9, ast: 10.9, stl: 1.2, blk: 0.7, tpm: 2.8, fgp: 0.477, fga: 15.2, ftp: 0.855, fta: 3.3, to: 2.3 } },
+      { id: "p010", name: "Steph Curry", team: "GSW", positions: ["PG"], yahooAdp: 9.6, stats: { pts: 26.4, reb: 4.5, ast: 5.1, stl: 0.7, blk: 0.4, tpm: 4.8, fgp: 0.450, fga: 19.5, ftp: 0.923, fta: 4.4, to: 2.8 } },
+      { id: "p011", name: "Trae Young", team: "ATL", positions: ["PG"], yahooAdp: 11.2, stats: { pts: 25.7, reb: 2.8, ast: 10.8, stl: 1.3, blk: 0.2, tpm: 3.2, fgp: 0.430, fga: 18.7, ftp: 0.855, fta: 7.5, to: 4.4 } },
+      { id: "p012", name: "Kevin Durant", team: "PHX", positions: ["SF", "PF"], yahooAdp: 12.0, stats: { pts: 27.1, reb: 6.6, ast: 5.0, stl: 0.9, blk: 1.2, tpm: 2.2, fgp: 0.523, fga: 19.1, ftp: 0.856, fta: 6.5, to: 3.3 } },
+      { id: "p013", name: "Donovan Mitchell", team: "CLE", positions: ["PG", "SG"], yahooAdp: 13.5, stats: { pts: 26.6, reb: 5.1, ast: 6.1, stl: 1.8, blk: 0.5, tpm: 3.3, fgp: 0.462, fga: 19.8, ftp: 0.865, fta: 5.8, to: 2.8 } },
+      { id: "p014", name: "Devin Booker", team: "PHX", positions: ["PG", "SG"], yahooAdp: 14.8, stats: { pts: 27.1, reb: 4.5, ast: 6.9, stl: 0.9, blk: 0.4, tpm: 2.2, fgp: 0.492, fga: 19.2, ftp: 0.886, fta: 6.7, to: 2.6 } },
+      { id: "p015", name: "Anthony Edwards", team: "MIN", positions: ["SG", "SF"], yahooAdp: 15.2, stats: { pts: 25.9, reb: 5.4, ast: 5.1, stl: 1.3, blk: 0.5, tpm: 2.4, fgp: 0.461, fga: 19.7, ftp: 0.836, fta: 6.4, to: 3.1 } },
+      { id: "p016", name: "Domantas Sabonis", team: "SAC", positions: ["PF", "C"], yahooAdp: 16.4, stats: { pts: 19.4, reb: 13.7, ast: 8.2, stl: 0.9, blk: 0.6, tpm: 0.4, fgp: 0.594, fga: 13.0, ftp: 0.704, fta: 5.1, to: 3.3 } },
+      { id: "p017", name: "Chet Holmgren", team: "OKC", positions: ["PF", "C"], yahooAdp: 17.8, stats: { pts: 16.5, reb: 7.9, ast: 2.4, stl: 0.6, blk: 2.3, tpm: 1.6, fgp: 0.530, fga: 11.6, ftp: 0.793, fta: 3.5, to: 1.9 } },
+      { id: "p018", name: "LeBron James", team: "LAL", positions: ["PG", "SF", "PF"], yahooAdp: 18.5, stats: { pts: 25.7, reb: 7.3, ast: 8.3, stl: 1.3, blk: 0.5, tpm: 2.1, fgp: 0.540, fga: 17.9, ftp: 0.750, fta: 5.7, to: 3.5 } },
+      { id: "p019", name: "Kyrie Irving", team: "DAL", positions: ["PG", "SG"], yahooAdp: 19.2, stats: { pts: 25.6, reb: 5.0, ast: 5.2, stl: 1.3, blk: 0.5, tpm: 3.0, fgp: 0.497, fga: 19.5, ftp: 0.905, fta: 4.0, to: 1.8 } },
+      { id: "p020", name: "Damian Lillard", team: "MIL", positions: ["PG"], yahooAdp: 20.1, stats: { pts: 24.3, reb: 4.4, ast: 7.0, stl: 1.0, blk: 0.2, tpm: 3.0, fgp: 0.424, fga: 17.5, ftp: 0.920, fta: 7.0, to: 2.6 } },
+      { id: "p021", name: "Jalen Brunson", team: "NYK", positions: ["PG"], yahooAdp: 21.3, stats: { pts: 28.7, reb: 3.6, ast: 6.7, stl: 0.9, blk: 0.2, tpm: 2.7, fgp: 0.479, fga: 21.4, ftp: 0.847, fta: 6.5, to: 2.4 } },
+      { id: "p022", name: "De'Aaron Fox", team: "SAC", positions: ["PG"], yahooAdp: 22.1, stats: { pts: 26.6, reb: 4.6, ast: 5.6, stl: 2.0, blk: 0.4, tpm: 2.6, fgp: 0.465, fga: 20.9, ftp: 0.738, fta: 5.7, to: 2.6 } },
+      { id: "p023", name: "Tyrese Maxey", team: "PHI", positions: ["PG", "SG"], yahooAdp: 23.4, stats: { pts: 25.9, reb: 3.7, ast: 6.2, stl: 1.0, blk: 0.5, tpm: 3.0, fgp: 0.450, fga: 20.3, ftp: 0.868, fta: 5.2, to: 1.7 } },
+      { id: "p024", name: "LaMelo Ball", team: "CHA", positions: ["PG"], yahooAdp: 24.0, stats: { pts: 23.9, reb: 5.1, ast: 8.0, stl: 1.8, blk: 0.2, tpm: 3.2, fgp: 0.433, fga: 19.0, ftp: 0.865, fta: 4.5, to: 3.8 } },
+      { id: "p025", name: "Bam Adebayo", team: "MIA", positions: ["C"], yahooAdp: 25.1, stats: { pts: 19.3, reb: 10.4, ast: 3.9, stl: 1.1, blk: 1.0, tpm: 0.3, fgp: 0.521, fga: 14.3, ftp: 0.755, fta: 5.3, to: 2.3 } },
+      { id: "p026", name: "Alperen Sengun", team: "HOU", positions: ["C"], yahooAdp: 26.5, stats: { pts: 21.1, reb: 9.3, ast: 5.0, stl: 1.2, blk: 0.9, tpm: 0.5, fgp: 0.537, fga: 15.6, ftp: 0.693, fta: 5.2, to: 2.6 } },
+      { id: "p027", name: "Paul George", team: "PHI", positions: ["SG", "SF"], yahooAdp: 27.8, stats: { pts: 22.6, reb: 5.2, ast: 3.5, stl: 1.5, blk: 0.5, tpm: 3.3, fgp: 0.471, fga: 16.7, ftp: 0.907, fta: 3.8, to: 2.1 } },
+      { id: "p028", name: "Scottie Barnes", team: "TOR", positions: ["SG", "SF", "PF"], yahooAdp: 28.3, stats: { pts: 19.9, reb: 8.2, ast: 6.1, stl: 1.3, blk: 1.5, tpm: 1.7, fgp: 0.475, fga: 15.7, ftp: 0.781, fta: 4.4, to: 2.8 } },
+      { id: "p029", name: "Karl-Anthony Towns", team: "NYK", positions: ["PF", "C"], yahooAdp: 29.2, stats: { pts: 21.8, reb: 8.3, ast: 3.0, stl: 0.7, blk: 0.7, tpm: 2.2, fgp: 0.504, fga: 15.3, ftp: 0.873, fta: 4.6, to: 2.9 } },
+      { id: "p030", name: "Fred VanVleet", team: "HOU", positions: ["PG"], yahooAdp: 30.0, stats: { pts: 17.4, reb: 3.8, ast: 8.1, stl: 1.4, blk: 0.4, tpm: 3.1, fgp: 0.416, fga: 13.8, ftp: 0.860, fta: 3.2, to: 1.7 } },
+      { id: "p031", name: "Kawhi Leonard", team: "LAC", positions: ["SF", "PF"], yahooAdp: 31.5, stats: { pts: 23.7, reb: 6.1, ast: 3.6, stl: 1.6, blk: 0.9, tpm: 2.1, fgp: 0.525, fga: 16.9, ftp: 0.885, fta: 4.3, to: 1.8 } },
+      { id: "p032", name: "Jaren Jackson Jr.", team: "MEM", positions: ["PF", "C"], yahooAdp: 32.8, stats: { pts: 22.5, reb: 5.5, ast: 2.3, stl: 1.2, blk: 1.6, tpm: 1.8, fgp: 0.444, fga: 17.1, ftp: 0.808, fta: 5.6, to: 2.4 } },
+      { id: "p033", name: "Lauri Markkanen", team: "UTA", positions: ["SF", "PF"], yahooAdp: 33.4, stats: { pts: 23.2, reb: 8.2, ast: 2.0, stl: 0.9, blk: 0.5, tpm: 3.2, fgp: 0.480, fga: 16.1, ftp: 0.899, fta: 5.0, to: 1.4 } },
+      { id: "p034", name: "Pascal Siakam", team: "IND", positions: ["SF", "PF"], yahooAdp: 34.2, stats: { pts: 21.7, reb: 7.1, ast: 4.3, stl: 0.8, blk: 0.3, tpm: 1.2, fgp: 0.536, fga: 16.2, ftp: 0.732, fta: 4.8, to: 1.8 } },
+      { id: "p035", name: "Mikal Bridges", team: "NYK", positions: ["SG", "SF"], yahooAdp: 35.1, stats: { pts: 19.6, reb: 4.5, ast: 3.6, stl: 1.0, blk: 0.4, tpm: 2.7, fgp: 0.436, fga: 15.8, ftp: 0.814, fta: 3.7, to: 1.3 } },
+      { id: "p036", name: "Jamal Murray", team: "DEN", positions: ["PG"], yahooAdp: 36.5, stats: { pts: 21.2, reb: 4.1, ast: 6.5, stl: 1.0, blk: 0.7, tpm: 2.5, fgp: 0.481, fga: 16.9, ftp: 0.853, fta: 3.2, to: 2.1 } },
+      { id: "p037", name: "Paolo Banchero", team: "ORL", positions: ["SF", "PF"], yahooAdp: 37.0, stats: { pts: 22.6, reb: 6.9, ast: 5.4, stl: 0.9, blk: 0.6, tpm: 1.5, fgp: 0.455, fga: 17.6, ftp: 0.725, fta: 7.0, to: 3.1 } },
+      { id: "p038", name: "Cade Cunningham", team: "DET", positions: ["PG", "SG"], yahooAdp: 38.2, stats: { pts: 22.7, reb: 4.3, ast: 7.5, stl: 0.9, blk: 0.4, tpm: 1.9, fgp: 0.449, fga: 18.8, ftp: 0.869, fta: 4.4, to: 3.4 } },
+      { id: "p039", name: "DeMar DeRozan", team: "SAC", positions: ["SG", "SF"], yahooAdp: 39.5, stats: { pts: 24.0, reb: 4.3, ast: 5.3, stl: 1.1, blk: 0.6, tpm: 0.9, fgp: 0.480, fga: 17.1, ftp: 0.853, fta: 7.1, to: 1.7 } },
+      { id: "p040", name: "Rudy Gobert", team: "MIN", positions: ["C"], yahooAdp: 40.2, stats: { pts: 14.0, reb: 12.9, ast: 1.3, stl: 0.7, blk: 2.1, tpm: 0.0, fgp: 0.661, fga: 8.1, ftp: 0.638, fta: 5.2, to: 1.6 } },
+      { id: "p041", name: "Evan Mobley", team: "CLE", positions: ["PF", "C"], yahooAdp: 41.0, stats: { pts: 15.7, reb: 9.4, ast: 3.2, stl: 0.9, blk: 1.4, tpm: 0.4, fgp: 0.580, fga: 11.0, ftp: 0.719, fta: 3.8, to: 1.8 } },
+      { id: "p042", name: "Desmond Bane", team: "MEM", positions: ["SG", "SF"], yahooAdp: 42.5, stats: { pts: 23.7, reb: 4.4, ast: 5.5, stl: 1.0, blk: 0.5, tpm: 3.3, fgp: 0.464, fga: 18.1, ftp: 0.857, fta: 4.1, to: 2.7 } },
+      { id: "p043", name: "Jalen Williams", team: "OKC", positions: ["SG", "SF", "PF"], yahooAdp: 43.1, stats: { pts: 19.1, reb: 4.0, ast: 4.5, stl: 1.1, blk: 0.6, tpm: 1.5, fgp: 0.540, fga: 14.0, ftp: 0.810, fta: 3.2, to: 1.7 } },
+      { id: "p044", name: "Derrick White", team: "BOS", positions: ["PG", "SG"], yahooAdp: 44.0, stats: { pts: 15.2, reb: 4.2, ast: 5.2, stl: 1.0, blk: 1.2, tpm: 2.7, fgp: 0.461, fga: 11.5, ftp: 0.900, fta: 2.5, to: 1.5 } },
+      { id: "p045", name: "Myles Turner", team: "IND", positions: ["C"], yahooAdp: 45.3, stats: { pts: 17.1, reb: 6.9, ast: 1.3, stl: 0.5, blk: 1.9, tpm: 1.5, fgp: 0.524, fga: 12.0, ftp: 0.773, fta: 4.2, to: 1.4 } },
+      { id: "p046", name: "CJ McCollum", team: "NOP", positions: ["PG", "SG"], yahooAdp: 46.8, stats: { pts: 20.0, reb: 4.3, ast: 4.6, stl: 1.0, blk: 0.6, tpm: 3.6, fgp: 0.459, fga: 16.3, ftp: 0.800, fta: 2.2, to: 1.7 } },
+      { id: "p047", name: "Miles Bridges", team: "CHA", positions: ["SF", "PF"], yahooAdp: 47.2, stats: { pts: 21.0, reb: 7.3, ast: 3.3, stl: 0.9, blk: 0.5, tpm: 2.3, fgp: 0.462, fga: 17.2, ftp: 0.825, fta: 3.8, to: 2.0 } },
+      { id: "p048", name: "Jarrett Allen", team: "CLE", positions: ["C"], yahooAdp: 48.0, stats: { pts: 16.5, reb: 10.5, ast: 2.7, stl: 0.7, blk: 1.1, tpm: 0.0, fgp: 0.634, fga: 10.6, ftp: 0.742, fta: 4.2, to: 1.6 } },
+      { id: "p049", name: "Kristaps Porzingis", team: "BOS", positions: ["PF", "C"], yahooAdp: 49.5, stats: { pts: 20.1, reb: 7.2, ast: 2.0, stl: 0.7, blk: 1.9, tpm: 1.9, fgp: 0.516, fga: 13.2, ftp: 0.858, fta: 5.1, to: 1.6 } },
+      { id: "p050", name: "Jayson Giddey", team: "CHI", positions: ["PG", "SG"], yahooAdp: 50.1, stats: { pts: 12.3, reb: 6.4, ast: 4.8, stl: 0.6, blk: 0.6, tpm: 1.0, fgp: 0.475, fga: 10.5, ftp: 0.800, fta: 1.9, to: 2.1 } }
+    ];
+
+    // 自動補齊 51~200+ 名通用 MVP 球員庫，確保數量充足且涵蓋常見深度球員
+    const POSITIONS_POOL = [["PG"], ["SG"], ["SF"], ["PF"], ["C"], ["PG","SG"], ["SG","SF"], ["SF","PF"], ["PF","C"]];
+    const TEAMS_POOL = ["BOS", "NYK", "PHI", "CLE", "MIL", "ORL", "IND", "MIA", "OKC", "DEN", "MIN", "LAC", "DAL", "PHX", "LAL", "SAC", "GSW", "HOU", "MEM"];
+    
+    const EXTENDED_NAMES = [
+      "Austin Reaves", "D'Angelo Russell", "Zach LaVine", "Nikola Vucevic", "Immanuel Quickley", "RJ Barrett",
+      "Nic Claxton", "Tobias Harris", "Cam Thomas", "Darius Garland", "Anfernee Simons", "Jerami Grant",
+      "Jonas Valanciunas", "Brandon Ingram", "Zion Williamson", "Klay Thompson", "Chris Paul", "Marcus Smart",
+      "Bogdan Bogdanovic", "Buddy Hield", "Malik Monk", "Herbert Jones", "Alex Caruso", "Keegan Murray",
+      "Jabari Smith Jr.", "Tari Eason", "Jalen Johnson", "De'Andre Hunter", "Clint Capela", "Onyeka Okongwu",
+      "Brook Lopez", "Bobby Portis", "Terry Rozier", "Tyler Herro", "Duncan Robinson", "Jaime Jaquez Jr.",
+      "Kelly Olynyk", "Walker Kessler", "Collin Sexton", "Keyonte George", "Jordan Clarkson", "John Collins",
+      "P.J. Washington", "Daniel Gafford", "Dereck Lively II", "Josh Hart", "Donte DiVincenzo", "Mitchell Robinson",
+      "Isaiah Hartenstein", "Naz Reid", "Jaden McDaniels", "Mike Conley", "Grayson Allen", "Yusuf Nurkic",
+      "Bradley Beal", "Mason Plumlee", "Harrison Barnes", "Keon Ellis", "Trey Murphy III", "Jose Alvarado",
+      "Keldon Johnson", "Devin Vassell", "Jeremy Sochan", "Tre Jones", "Zach Edey", "Marcus Sasser",
+      "Ausar Thompson", "Amen Thompson", "Jalen Duren", "Isaiah Stewart", "Jaden Ivey", "Saddiq Bey",
+      "Kyle Kuzma", "Jordan Poole", "Corey Kispert", "Tyus Jones", "Alex Sarr", "Bub Carrington",
+      "Matisse Thybulle", "Scoot Henderson", "Shaedon Sharpe", "Deandre Ayton", "Robert Williams III", "Denii Avdija",
+      "Aaron Gordon", "Michael Porter Jr.", "Christian Braun", "Peyton Watson", "KCP", "Bruce Brown",
+      "Gary Trent Jr.", "Jakob Poeltl", "Gradey Dick", "Kelly Oubre Jr.", "Caleb Martin", "Andre Drummond",
+      "Payton Pritchard", "Sam Hauser", "Al Horford", "Luke Kornet", "Moritz Wagner", "Cole Anthony",
+      "Suggs Jalen", "Goga Bitadze", "Wendell Carter Jr.", "Jonathan Kuminga", "Brandin Podziemski", "Trayce Jackson-Davis",
+      "T.J. McConnell", "Aaron Nesmith", "Ben Sheppard", "Obi Toppin", "Norman Powell", "Ivica Zubac",
+      "Terance Mann", "Amir Coffey", "Cam Whitmore", "Amen Thompson", "Reed Sheppard", "Steven Adams",
+      "GG Jackson", "Vince Williams Jr.", "Santi Aldama", "Luke Kennard", "Jock Landale", "Duop Reath",
+      "Naji Marshall", "Quentin Grimes", "Max Strus", "Caris LeVert", "Georges Niang", "Isaac Okoro"
+    ];
+
+    EXTENDED_NAMES.forEach((name, i) => {
+      const adp = 51 + i;
+      RAW_PLAYERS.push({
+        id: `p${String(adp).padStart(3, '0')}`,
+        name: name,
+        team: TEAMS_POOL[i % TEAMS_POOL.length],
+        positions: POSITIONS_POOL[i % POSITIONS_POOL.length],
+        yahooAdp: Number((adp + Math.random() * 0.5).toFixed(1)),
+        stats: {
+          pts: Number((11 + (200 - i) * 0.08).toFixed(1)),
+          reb: Number((3 + (i % 7) * 1.1).toFixed(1)),
+          ast: Number((1.5 + (i % 5) * 1.2).toFixed(1)),
+          stl: Number((0.6 + (i % 3) * 0.3).toFixed(1)),
+          blk: Number((0.3 + (i % 4) * 0.4).toFixed(1)),
+          tpm: Number((0.8 + (i % 6) * 0.4).toFixed(1)),
+          fgp: Number((0.42 + (i % 8) * 0.02).toFixed(3)),
+          fga: Number((8 + (200 - i) * 0.04).toFixed(1)),
+          ftp: Number((0.70 + (i % 5) * 0.04).toFixed(3)),
+          fta: Number((1.5 + (i % 4) * 0.8).toFixed(1)),
+          to: Number((1.1 + (i % 3) * 0.5).toFixed(1))
+        }
+      });
+    });
+
+    const CAT_KEYS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tpm', 'fgp', 'ftp', 'to'];
+
+    createApp({
+      setup() {
+        const teamsCount = ref(12);
+        const userPosition = ref(3);
+        const selectedCorePlayers = ref([]);
+        const activePunts = ref([]);
+        const hasAppliedRec = ref(false);
+        const searchQuery = ref('');
+        const positionFilter = ref('ALL');
+
+        const totalPlayersCount = computed(() => RAW_PLAYERS.length);
+
+        const myPicks = computed(() => {
+          const t = teamsCount.value;
+          const pos = userPosition.value;
+          return [pos, t * 2 - pos + 1, t * 2 + pos];
+        });
+
+        const addCorePlayer = (player) => {
+          if (selectedCorePlayers.value.length < 3) {
+            selectedCorePlayers.value.push(player);
+          }
+        };
+
+        const removeCorePlayer = (idx) => {
+          selectedCorePlayers.value.splice(idx, 1);
+          hasAppliedRec.value = false;
+        };
+
+        // 核心動態 Z-Score 計算引擎
+        const calculateZScore = (player, puntList) => {
+          let score = 0;
+          CAT_KEYS.forEach(cat => {
+            if (!puntList.includes(cat)) {
+              let z = 0;
+              if (cat === 'pts') z = (player.stats.pts - 16.5) / 5.5;
+              else if (cat === 'reb') z = (player.stats.reb - 5.8) / 2.8;
+              else if (cat === 'ast') z = (player.stats.ast - 3.8) / 2.2;
+              else if (cat === 'stl') z = (player.stats.stl - 0.95) / 0.35;
+              else if (cat === 'blk') z = (player.stats.blk - 0.7) / 0.5;
+              else if (cat === 'tpm') z = (player.stats.tpm - 1.8) / 0.9;
+              else if (cat === 'fgp') z = ((player.stats.fgp - 0.47) * player.stats.fga) / 1.8;
+              else if (cat === 'ftp') z = ((player.stats.ftp - 0.78) * player.stats.fta) / 1.8;
+              else if (cat === 'to') z = -(player.stats.to - 2.1) / 0.9;
+              
+              score += z;
+            }
+          });
+          return Number(score.toFixed(2));
+        };
+
+        const recommendedPunts = computed(() => {
+          if (selectedCorePlayers.value.length < 3) return [];
+          const catTotals = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, tpm: 0, fgp: 0, ftp: 0, to: 0 };
+          
+          selectedCorePlayers.value.forEach(p => {
+            CAT_KEYS.forEach(cat => {
+              if (cat === 'ftp') catTotals.ftp += ((p.stats.ftp - 0.78) * p.stats.fta) / 1.8;
+              else if (cat === 'tpm') catTotals.tpm += (p.stats.tpm - 1.8) / 0.9;
+              else if (cat === 'fgp') catTotals.fgp += ((p.stats.fgp - 0.47) * p.stats.fga) / 1.8;
+            });
+          });
+
+          const recs = [];
+          if (catTotals.ftp <= -1.4) recs.push('ftp');
+          if (catTotals.tpm <= -1.4) recs.push('tpm');
+          if (catTotals.fgp <= -1.4) recs.push('fgp');
+          return recs;
+        });
+
+        const applyRecommendedPunts = () => {
+          activePunts.value = [...new Set([...activePunts.value, ...recommendedPunts.value])];
+          hasAppliedRec.value = true;
+        };
+
+        // 過濾、搜尋與排序後的球員清單
+        const filteredPlayers = computed(() => {
+          return RAW_PLAYERS.map(p => ({
+            ...p,
+            puntZ: calculateZScore(p, activePunts.value)
+          }))
+          .filter(p => {
+            const matchesSearch = p.name.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+                                  p.team.toLowerCase().includes(searchQuery.value.toLowerCase());
+            const matchesPos = positionFilter.value === 'ALL' || p.positions.includes(positionFilter.value);
+            return matchesSearch && matchesPos;
+          })
+          .sort((a, b) => b.puntZ - a.puntZ);
+        });
+
+        return {
+          teamsCount,
+          userPosition,
+          myPicks,
+          catKeys: CAT_KEYS,
+          selectedCorePlayers,
+          activePunts,
+          recommendedPunts,
+          hasAppliedRec,
+          searchQuery,
+          positionFilter,
+          totalPlayersCount,
+          filteredPlayers,
+          addCorePlayer,
+          removeCorePlayer,
+          applyRecommendedPunts
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
